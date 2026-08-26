@@ -31,23 +31,39 @@ End Sub
 Sub AutoColor()
 
     Dim c As Range
+    Dim FirstColor As Long
+    Dim MixedColors As Boolean
 
+    'Get the color of the first cell
+    FirstColor = Selection.Cells(1, 1).Font.Color
+
+    'Check whether selected cells have different colors
     For Each c In Selection
-
-        Select Case c.Font.Color
-
-            Case RGB(0, 0, 0)          'Black
-                c.Font.Color = RGB(0, 0, 255)      'Blue
-
-            Case RGB(0, 0, 255)        'Blue
-                c.Font.Color = RGB(0, 176, 80)     'Green
-
-            Case Else                  'Green or anything else
-                c.Font.Color = RGB(0, 0, 0)        'Black
-
-        End Select
-
+        If c.Font.Color <> FirstColor Then
+            MixedColors = True
+            Exit For
+        End If
     Next c
+
+    'If colors are mixed, reset everything to black
+    If MixedColors Then
+        Selection.Font.Color = RGB(0, 0, 0)
+        Exit Sub
+    End If
+
+    'Otherwise cycle the entire selection together
+    Select Case FirstColor
+
+        Case RGB(0, 0, 0)          'Black
+            Selection.Font.Color = RGB(0, 0, 255)      'Blue
+
+        Case RGB(0, 0, 255)        'Blue
+            Selection.Font.Color = RGB(0, 176, 80)     'Green
+
+        Case Else                  'Green or anything else
+            Selection.Font.Color = RGB(0, 0, 0)        'Black
+
+    End Select
 
 End Sub
 
