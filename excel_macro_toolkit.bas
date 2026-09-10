@@ -53,7 +53,7 @@ Private Sub AdjustScale(ByVal Change As Long)
 
         ElseIf IsNumeric(c.Value) And Not IsEmpty(c.Value) Then
 
-            c.Value = c.Value * (10 ^ Change)
+            c.Formula = "=(" & Trim$(Str$(c.Value2)) & ")*10^" & Change
 
         End If
 
