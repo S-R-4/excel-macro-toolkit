@@ -1,33 +1,65 @@
 Option Explicit
+Private CollectedNumbers As String
 
 Sub DecimalRight()
-
-    Dim c As Range
-
-    For Each c In Selection.Cells
-        If Not c.HasFormula Then
-            If IsNumeric(c.Value) And Not IsEmpty(c.Value) Then
-                c.Value = c.Value / 10
-            End If
-        End If
-    Next c
-
+    AdjustScale -1
 End Sub
 
 Sub DecimalLeft()
+    AdjustScale 1
+End Sub
+
+Private Sub AdjustScale(ByVal Change As Long)
 
     Dim c As Range
+    Dim rx As Object
+    Dim matches As Object
+    Dim BaseFormula As String
+    Dim ScalePower As Long
+    Dim CurrentFormula As String
+
+    Set rx = CreateObject("VBScript.RegExp")
+
+    'Recognizes formulas created by this macro:
+    '=(original formula)*10^number
+    rx.Pattern = "^=\((.*)\)\*10\^(-?\d+)$"
+    rx.IgnoreCase = True
+    rx.Global = False
 
     For Each c In Selection.Cells
-        If Not c.HasFormula Then
-            If IsNumeric(c.Value) And Not IsEmpty(c.Value) Then
-                c.Value = c.Value * 10
+
+        If c.HasFormula Then
+
+            CurrentFormula = c.Formula
+
+            If rx.Test(CurrentFormula) Then
+                Set matches = rx.Execute(CurrentFormula)
+
+                BaseFormula = matches(0).SubMatches(0)
+                ScalePower = CLng(matches(0).SubMatches(1))
+            Else
+                BaseFormula = Mid$(CurrentFormula, 2)
+                ScalePower = 0
             End If
+
+            ScalePower = ScalePower + Change
+
+            If ScalePower = 0 Then
+                'Restore the original formula
+                c.Formula = "=" & BaseFormula
+            Else
+                c.Formula = "=(" & BaseFormula & ")*10^" & ScalePower
+            End If
+
+        ElseIf IsNumeric(c.Value) And Not IsEmpty(c.Value) Then
+
+            c.Value = c.Value * (10 ^ Change)
+
         End If
+
     Next c
 
 End Sub
-
 Sub AutoColor()
 
     Dim c As Range
@@ -161,11 +193,62 @@ Sub AddDashForZero()
     Next c
 
 End Sub
+Sub CopyCellValueOnly()
+
+    Dim c As Range
+    Dim v As Variant
+
+    If TypeName(Selection) <> "Range" Then Exit Sub
+
+    For Each c In Selection.Cells
+
+        v = c.Value2
+
+        If Not IsError(v) Then
+            If Not IsEmpty(v) Then
+                If IsNumeric(v) Then
+
+                    If Len(CollectedNumbers) > 0 Then
+                        CollectedNumbers = CollectedNumbers & ","
+                    End If
+
+                    CollectedNumbers = CollectedNumbers & _
+                                       Trim$(Str$(CDbl(v)))
+
+                End If
+            End If
+        End If
+
+    Next c
+
+End Sub
+
+Sub SumClipboardNumbers()
+
+    If Len(CollectedNumbers) = 0 Then
+        MsgBox "No numbers collected yet."
+        Exit Sub
+    End If
+
+    ActiveCell.Formula = "=SUM(" & CollectedNumbers & ")"
+
+    'Clear the list after inserting the formula
+    CollectedNumbers = ""
+
+End Sub
+
+Sub ClearCollectedNumbers()
+
+    CollectedNumbers = ""
+
+    MsgBox "Collected numbers cleared."
+
+End Sub
 
 Sub SetCustomShortcuts()
 
-    Application.OnKey "%+{.}", "DecimalRight"
-    Application.OnKey "%+{,}", "DecimalLeft"
+    Application.OnKey "%+{.}", "DecimalRight"  'Alt + Shift + .
+    Application.OnKey "%+{,}", "DecimalLeft"   'Alt + Shift + ,
     Application.OnKey "^%a", "AutoColor"
     Application.OnKey "^%s", "ToggleSigns"
     Application.OnKey "^%4", "FormatCurrency"    '$
@@ -176,6 +259,9 @@ Sub SetCustomShortcuts()
     Application.OnKey "^%{[}", "DecreaseDecimals"
     Application.OnKey "^%{]}", "IncreaseDecimals"
     Application.OnKey "^%8", "AddDashForZero"
+    Application.OnKey "%+c", "CopyCellValueOnly"  'Alt + Shift + C
+    Application.OnKey "%+v", "SumClipboardNumbers"
+    Application.OnKey "%+x", "ClearCollectedNumbers" 'Clear list
 
     MsgBox "Shortcuts activated"
 
