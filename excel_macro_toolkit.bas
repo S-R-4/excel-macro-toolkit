@@ -1,5 +1,31 @@
 Option Explicit
 Private CollectedNumbers As String
+Private Declare PtrSafe Function OpenClipboard Lib "user32" _
+    (ByVal hwnd As LongPtr) As Long
+
+Private Declare PtrSafe Function CloseClipboard Lib "user32" () As Long
+
+Private Declare PtrSafe Function EmptyClipboard Lib "user32" () As Long
+
+Private Declare PtrSafe Function SetClipboardData Lib "user32" _
+    (ByVal uFormat As Long, ByVal hMem As LongPtr) As LongPtr
+
+Private Declare PtrSafe Function GlobalAlloc Lib "kernel32" _
+    (ByVal uFlags As Long, ByVal dwBytes As LongPtr) As LongPtr
+
+Private Declare PtrSafe Function GlobalLock Lib "kernel32" _
+    (ByVal hMem As LongPtr) As LongPtr
+
+Private Declare PtrSafe Function GlobalUnlock Lib "kernel32" _
+    (ByVal hMem As LongPtr) As Long
+
+Private Declare PtrSafe Function GlobalFree Lib "kernel32" _
+    (ByVal hMem As LongPtr) As LongPtr
+
+Private Declare PtrSafe Sub CopyMemory Lib "kernel32" _
+    Alias "RtlMoveMemory" _
+    (ByVal Destination As LongPtr, ByVal Source As LongPtr, _
+     ByVal Length As LongPtr)
 
 Sub DecimalRight()
     AdjustScale -1
@@ -195,33 +221,116 @@ Sub AddDashForZero()
 End Sub
 Sub CopyCellValueOnly()
 
+    Dim area As Range
+    Dim rw As Range
     Dim c As Range
     Dim v As Variant
+    Dim ClipboardText As String
+    Dim RowText As String
+    Dim NewNumbers As String
+    Dim FirstRow As Boolean
+    Dim FirstCell As Boolean
 
     If TypeName(Selection) <> "Range" Then Exit Sub
 
-    For Each c In Selection.Cells
+    FirstRow = True
 
-        v = c.Value2
+    For Each area In Selection.Areas
+        For Each rw In area.Rows
 
-        If Not IsError(v) Then
-            If Not IsEmpty(v) Then
-                If IsNumeric(v) Then
+            RowText = ""
+            FirstCell = True
 
-                    If Len(CollectedNumbers) > 0 Then
-                        CollectedNumbers = CollectedNumbers & ","
+            For Each c In rw.Cells
+
+                v = c.Value2
+
+                If Not FirstCell Then RowText = RowText & vbTab
+                FirstCell = False
+
+                'Copy values, not formulas, to the clipboard.
+                If IsError(v) Then
+                    RowText = RowText & c.Text
+                ElseIf Not IsEmpty(v) Then
+                    RowText = RowText & CStr(v)
+
+                    'Only numbers go into the accumulated SUM list.
+                    If IsNumeric(v) Then
+                        If Len(NewNumbers) > 0 Then
+                            NewNumbers = NewNumbers & ","
+                        End If
+
+                        NewNumbers = NewNumbers & Trim$(Str$(CDbl(v)))
                     End If
-
-                    CollectedNumbers = CollectedNumbers & _
-                                       Trim$(Str$(CDbl(v)))
-
                 End If
+
+            Next c
+
+            If Not FirstRow Then
+                ClipboardText = ClipboardText & vbCrLf
             End If
+
+            ClipboardText = ClipboardText & RowText
+            FirstRow = False
+
+        Next rw
+    Next area
+
+    If Not PutTextOnClipboard(ClipboardText) Then
+        MsgBox "Couldn't copy to the clipboard. Try again." & _
+               vbCrLf & "No numbers were added to the list.", vbExclamation
+        Exit Sub
+    End If
+
+    If Len(NewNumbers) > 0 Then
+        If Len(CollectedNumbers) > 0 Then
+            CollectedNumbers = CollectedNumbers & ","
         End If
 
-    Next c
+        CollectedNumbers = CollectedNumbers & NewNumbers
+    End If
 
 End Sub
+Private Function PutTextOnClipboard(ByVal Text As String) As Boolean
+
+    Dim hMem As LongPtr
+    Dim pMem As LongPtr
+    Dim ByteCount As LongPtr
+    Dim ClipboardIsOpen As Boolean
+
+    On Error GoTo CleanUp
+
+    'Allocate zero-initialized memory, including a Unicode terminator.
+    ByteCount = LenB(Text) + 2
+    hMem = GlobalAlloc(&H42, ByteCount)
+    If hMem = 0 Then GoTo CleanUp
+
+    pMem = GlobalLock(hMem)
+    If pMem = 0 Then GoTo CleanUp
+
+    If LenB(Text) > 0 Then
+        CopyMemory pMem, StrPtr(Text), LenB(Text)
+    End If
+
+    GlobalUnlock hMem
+
+    If OpenClipboard(Application.hwnd) = 0 Then GoTo CleanUp
+    ClipboardIsOpen = True
+
+    If EmptyClipboard() = 0 Then GoTo CleanUp
+
+    '13 = Unicode text.
+    If SetClipboardData(13, hMem) = 0 Then GoTo CleanUp
+
+    'Windows now owns this memory.
+    hMem = 0
+    PutTextOnClipboard = True
+
+CleanUp:
+    If ClipboardIsOpen Then CloseClipboard
+    If hMem <> 0 Then GlobalFree hMem
+
+End Function
 
 Sub SumClipboardNumbers()
 
