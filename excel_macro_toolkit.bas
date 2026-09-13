@@ -165,11 +165,113 @@ End Sub
 
 Sub PasteSkipBlanks()
 
-    ActiveSheet.Paste
+    Dim Text As String
+    Dim Lines As Variant
+    Dim Fields As Variant
+    Dim Line As Variant
+    Dim RowsToPaste As Collection
+    Dim Output() As Variant
+    Dim RowCount As Long
+    Dim ColumnCount As Long
+    Dim r As Long
+    Dim j As Long
+    Dim CheckText As String
+    Dim Target As Range
+    Dim PossibleError() As Boolean
+    Dim LooksNumeric As Object
 
-    On Error Resume Next
-    Selection.SpecialCells(xlCellTypeBlanks).Delete Shift:=xlUp
-    On Error GoTo 0
+    If TypeName(Selection) <> "Range" Then Exit Sub
+
+    On Error GoTo PasteFailed
+
+    Text = ReadClipboardText()
+
+    If Len(Text) = 0 Then
+        MsgBox "Couldn't read clipboard text. Copy it again.", vbExclamation
+        Exit Sub
+    End If
+
+    Text = Replace(Text, vbCrLf, vbLf)
+    Text = Replace(Text, vbCr, vbLf)
+    Lines = Split(Text, vbLf)
+
+    Set RowsToPaste = New Collection
+
+    For Each Line In Lines
+
+        'Skip lines containing only whitespace.
+        CheckText = Replace(CStr(Line), vbTab, "")
+        CheckText = Replace(CheckText, ChrW(160), " ")
+
+        If Len(Trim$(CheckText)) > 0 Then
+            RowsToPaste.Add CStr(Line)
+
+            Fields = Split(CStr(Line), vbTab)
+
+            If UBound(Fields) + 1 > ColumnCount Then
+                ColumnCount = UBound(Fields) + 1
+            End If
+        End If
+
+    Next Line
+
+    RowCount = RowsToPaste.Count
+    If RowCount = 0 Then Exit Sub
+
+    If RowCount > ActiveSheet.Rows.Count - ActiveCell.Row + 1 _
+       Or ColumnCount > ActiveSheet.Columns.Count - ActiveCell.Column + 1 Then
+        MsgBox "There isn't enough room to paste here.", vbExclamation
+        Exit Sub
+    End If
+
+    ReDim Output(1 To RowCount, 1 To ColumnCount)
+    ReDim PossibleError(1 To RowCount, 1 To ColumnCount)
+
+    Set LooksNumeric = CreateObject("VBScript.RegExp")
+    LooksNumeric.Pattern = "[0-9]"
+
+    For r = 1 To RowCount
+        Fields = Split(RowsToPaste(r), vbTab)
+
+        For j = 0 To UBound(Fields)
+            Dim Entry As String
+            Dim NumberCheck As Object
+            
+            Entry = Trim$(Fields(j))
+            
+            Set NumberCheck = CreateObject("VBScript.RegExp")
+            NumberCheck.Pattern = "^[+-]?([0-9]+|[0-9]{1,3}(,[0-9]{3})+)(\.[0-9]+)?$"
+            
+            If NumberCheck.Test(Entry) Then
+                Output(r, j + 1) = Val(Replace(Entry, ",", ""))
+            Else
+                'Flag entries containing digits but no letters.
+                PossibleError(r, j + 1) = LooksNumeric.Test(Entry) _
+                                         And Not (LCase$(Entry) Like "*[a-z]*")
+            
+                Select Case Left$(Entry, 1)
+                    Case "=", "+", "-", "@"
+                        Output(r, j + 1) = "'" & Entry
+                    Case Else
+                        Output(r, j + 1) = Entry
+                End Select
+            End If
+        Next j
+    Next r
+
+    Set Target = ActiveCell.Resize(RowCount, ColumnCount)
+    Target.Value2 = Output
+    For r = 1 To RowCount
+        For j = 1 To ColumnCount
+            If PossibleError(r, j) Then
+                Target.Cells(r, j).Interior.Color = RGB(255, 199, 206)
+            End If
+        Next j
+    Next r
+    Exit Sub
+
+PasteFailed:
+    MsgBox "Couldn't paste: " & Err.Description, vbExclamation
 
 End Sub
 
