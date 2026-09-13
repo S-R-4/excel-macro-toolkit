@@ -26,6 +26,12 @@ Private Declare PtrSafe Sub CopyMemory Lib "kernel32" _
     Alias "RtlMoveMemory" _
     (ByVal Destination As LongPtr, ByVal Source As LongPtr, _
      ByVal Length As LongPtr)
+     
+Private Declare PtrSafe Function GetClipboardData Lib "user32" _
+    (ByVal uFormat As Long) As LongPtr
+
+Private Declare PtrSafe Function lstrlenW Lib "kernel32" _
+    (ByVal lpString As LongPtr) As Long
 
 Sub DecimalRight()
     AdjustScale -1
@@ -354,6 +360,142 @@ Sub ClearCollectedNumbers()
 
 End Sub
 
+Private Function ReadClipboardText() As String
+
+    Dim hMem As LongPtr
+    Dim pMem As LongPtr
+    Dim CharCount As Long
+    Dim Text As String
+    Dim ClipboardIsOpen As Boolean
+
+    On Error GoTo CleanUp
+
+    If OpenClipboard(Application.hwnd) = 0 Then GoTo CleanUp
+    ClipboardIsOpen = True
+
+    '13 = Unicode text.
+    hMem = GetClipboardData(13)
+    If hMem = 0 Then GoTo CleanUp
+
+    pMem = GlobalLock(hMem)
+    If pMem = 0 Then GoTo CleanUp
+
+    CharCount = lstrlenW(pMem)
+
+    If CharCount > 0 Then
+        Text = String$(CharCount, vbNullChar)
+        CopyMemory StrPtr(Text), pMem, LenB(Text)
+        ReadClipboardText = Text
+    End If
+
+CleanUp:
+    If pMem <> 0 Then GlobalUnlock hMem
+    If ClipboardIsOpen Then CloseClipboard
+
+End Function
+
+Sub PasteTextAcrossColumns()
+
+    Dim Text As String
+    Dim Lines As Variant
+    Dim Item As Variant
+    Dim Entry As String
+    Dim Items As Collection
+    Dim Output() As Variant
+    Dim i As Long
+    Dim Target As Range
+    Dim rx As Object
+    Dim PossibleError() As Boolean
+    Dim LooksNumeric As Object
+
+    If TypeName(Selection) <> "Range" Then Exit Sub
+
+    On Error GoTo PasteFailed
+
+    Text = ReadClipboardText()
+
+    If Len(Text) = 0 Then
+        MsgBox "Couldn't read text from the clipboard. Copy it again.", _
+               vbExclamation
+        Exit Sub
+    End If
+
+    'Normalize Windows and other line endings.
+    Text = Replace(Text, vbCrLf, vbLf)
+    Text = Replace(Text, vbCr, vbLf)
+
+    Lines = Split(Text, vbLf)
+    Set Items = New Collection
+
+    For Each Item In Lines
+        Entry = CStr(Item)
+    
+        'Remove dollar signs and normalize spaces.
+        Entry = Replace(Entry, "$", "")
+        Entry = Replace(Entry, ChrW(160), " ")
+        Entry = Trim$(Entry)
+    
+        'Remove any existing leading apostrophes.
+        Do While Len(Entry) > 0
+            If Left$(Entry, 1) <> "'" Then Exit Do
+            Entry = Trim$(Mid$(Entry, 2))
+        Loop
+    
+        'Skip blank lines, including lines that contained only $.
+        If Len(Entry) > 0 Then Items.Add Entry
+    Next Item
+
+    If Items.Count = 0 Then Exit Sub
+
+    If Items.Count > ActiveSheet.Columns.Count - ActiveCell.Column + 1 Then
+        MsgBox "There aren't enough columns to paste these entries.", _
+               vbExclamation
+        Exit Sub
+    End If
+
+    'Recognize numbers using US-style commas and decimal points.
+    Set rx = CreateObject("VBScript.RegExp")
+    rx.Pattern = "^[+-]?([0-9]+|[0-9]{1,3}(,[0-9]{3})+)(\.[0-9]+)?$"
+
+    ReDim Output(1 To 1, 1 To Items.Count)
+    ReDim PossibleError(1 To Items.Count)
+
+    Set LooksNumeric = CreateObject("VBScript.RegExp")
+    LooksNumeric.Pattern = "[0-9]"
+
+    For i = 1 To Items.Count
+        Entry = Items(i)
+    
+        If rx.Test(Entry) Then
+            Output(1, i) = Val(Replace(Entry, ",", ""))
+        Else
+            'Keep entries that fail the number check as text.
+            Output(1, i) = "'" & Entry
+    
+            'Flag entries containing digits but no letters.
+            PossibleError(i) = LooksNumeric.Test(Entry) _
+                               And Not (LCase$(Entry) Like "*[a-z]*")
+        End If
+    Next i
+    
+    Set Target = ActiveCell.Resize(1, Items.Count)
+    Target.Value2 = Output
+    
+    For i = 1 To Items.Count
+        If PossibleError(i) Then
+            With Target.Cells(1, i)
+                .Interior.Color = RGB(255, 199, 206) 'Light red
+            End With
+        End If
+    Next i
+
+    Exit Sub
+
+PasteFailed:
+    MsgBox "Couldn't paste: " & Err.Description, vbExclamation
+
+End Sub
+
 Sub SetCustomShortcuts()
 
     Application.OnKey "%+{.}", "DecimalRight"  'Alt + Shift + .
@@ -371,6 +513,7 @@ Sub SetCustomShortcuts()
     Application.OnKey "%+c", "CopyCellValueOnly"  'Alt + Shift + C
     Application.OnKey "%+v", "SumClipboardNumbers"
     Application.OnKey "%+x", "ClearCollectedNumbers" 'Clear list
+    Application.OnKey "%+z", "PasteTextAcrossColumns" 'Alt + Shift + Z
 
     MsgBox "Shortcuts activated"
 
