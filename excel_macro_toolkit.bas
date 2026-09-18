@@ -83,7 +83,7 @@ Private Sub AdjustScale(ByVal Change As Long)
                 c.Formula = "=(" & BaseFormula & ")*10^" & ScalePower
             End If
 
-        ElseIf IsNumeric(c.Value) And Not IsEmpty(c.Value) Then
+        ElseIf IsNumeric(c.value) And Not IsEmpty(c.value) Then
 
             c.Formula = "=(" & Trim$(Str$(c.Value2)) & ")*10^" & Change
 
@@ -134,18 +134,74 @@ End Sub
 Sub ToggleSigns()
 
     Dim c As Range
+    Dim expr As String
+    Dim wasNegative As Boolean
 
     For Each c In Selection.Cells
 
         If c.HasFormula Then
-            c.Formula = "=-(" & Mid(c.Formula, 2) & ")"
-        ElseIf IsNumeric(c.Value) And Not IsEmpty(c.Value) Then
-            c.Value = -c.Value
+
+            expr = Mid$(c.Formula, 2)
+            wasNegative = False
+
+            'Remove existing outer negations, tracking their net effect.
+            Do While HasOuterNegation(expr)
+                expr = Mid$(expr, 3, Len(expr) - 3)
+                wasNegative = Not wasNegative
+            Loop
+
+            'Toggle the sign using at most one outer negation.
+            If wasNegative Then
+                c.Formula = "=" & expr
+            Else
+                c.Formula = "=-(" & expr & ")"
+            End If
+
+        ElseIf Not IsError(c.Value2) Then
+            If Not IsEmpty(c.Value2) And IsNumeric(c.Value2) Then
+                c.Value2 = -c.Value2
+            End If
         End If
 
     Next c
 
 End Sub
+
+Private Function HasOuterNegation(ByVal expr As String) As Boolean
+
+    Dim i As Long
+    Dim depth As Long
+    Dim ch As String
+    Dim quote As String
+
+    If Left$(expr, 2) <> "-(" Then Exit Function
+    If Right$(expr, 1) <> ")" Then Exit Function
+
+    For i = 2 To Len(expr)
+        ch = Mid$(expr, i, 1)
+
+        'Ignore parentheses inside text or quoted sheet names.
+        If quote <> "" Then
+            If ch = quote Then quote = ""
+        Else
+            Select Case ch
+                Case """", "'"
+                    quote = ch
+                Case "("
+                    depth = depth + 1
+                Case ")"
+                    depth = depth - 1
+
+                    'The outer parentheses must enclose everything.
+                    If depth = 0 Then
+                        HasOuterNegation = (i = Len(expr))
+                        Exit Function
+                    End If
+            End Select
+        End If
+    Next i
+
+End Function
 
 Sub FormatPercent()
     Selection.NumberFormat = "0.0%_);(0.0%);@_)"
@@ -176,7 +232,7 @@ Sub PasteSkipBlanks()
     Dim r As Long
     Dim j As Long
     Dim CheckText As String
-    Dim Target As Range
+    Dim target As Range
     Dim PossibleError() As Boolean
     Dim LooksNumeric As Object
 
@@ -218,7 +274,7 @@ Sub PasteSkipBlanks()
     RowCount = RowsToPaste.Count
     If RowCount = 0 Then Exit Sub
 
-    If RowCount > ActiveSheet.Rows.Count - ActiveCell.Row + 1 _
+    If RowCount > ActiveSheet.rows.Count - ActiveCell.Row + 1 _
        Or ColumnCount > ActiveSheet.Columns.Count - ActiveCell.Column + 1 Then
         MsgBox "There isn't enough room to paste here.", vbExclamation
         Exit Sub
@@ -259,12 +315,12 @@ Sub PasteSkipBlanks()
         Next j
     Next r
 
-    Set Target = ActiveCell.Resize(RowCount, ColumnCount)
-    Target.Value2 = Output
+    Set target = ActiveCell.Resize(RowCount, ColumnCount)
+    target.Value2 = Output
     For r = 1 To RowCount
         For j = 1 To ColumnCount
             If PossibleError(r, j) Then
-                Target.Cells(r, j).Interior.Color = RGB(255, 199, 206)
+                target.Cells(r, j).Interior.Color = RGB(255, 199, 206)
             End If
         Next j
     Next r
@@ -344,7 +400,7 @@ Sub CopyCellValueOnly()
     FirstRow = True
 
     For Each area In Selection.Areas
-        For Each rw In area.Rows
+        For Each rw In area.rows
 
             RowText = ""
             FirstCell = True
@@ -505,7 +561,7 @@ Sub PasteTextAcrossColumns()
     Dim Items As Collection
     Dim Output() As Variant
     Dim i As Long
-    Dim Target As Range
+    Dim target As Range
     Dim rx As Object
     Dim PossibleError() As Boolean
     Dim LooksNumeric As Object
@@ -580,12 +636,12 @@ Sub PasteTextAcrossColumns()
         End If
     Next i
     
-    Set Target = ActiveCell.Resize(1, Items.Count)
-    Target.Value2 = Output
+    Set target = ActiveCell.Resize(1, Items.Count)
+    target.Value2 = Output
     
     For i = 1 To Items.Count
         If PossibleError(i) Then
-            With Target.Cells(1, i)
+            With target.Cells(1, i)
                 .Interior.Color = RGB(255, 199, 206) 'Light red
             End With
         End If
